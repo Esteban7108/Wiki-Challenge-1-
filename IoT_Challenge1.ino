@@ -10,13 +10,11 @@
 #define ONE_WIRE_BUS A0   // Sensor de temperatura DS18B20
 #define BUZZER_PIN 7      // Buzzer
 #define TEMP_INCREMENTO_UMBRAL 5.0  // Incremento de temperatura en °C para alerta
-#define TEMP_UMBRAL 27 
-#define GAS_SENSOR_PIN A3
+#define TEMP_UMBRAL 27
+#define GAS_SENSOR_PIN A3  // Sensor de gas MQ-2
 #define HUMIDITY_SENSOR_PIN A1  // Sensor de humedad
-#define GAS_SENSOR_PIN A3       // Sensor de gas MQ-2
 #define FLAME_SENSOR_PIN A2     // Sensor de llama
 #define FLAME_DETECTED 500      // Valor de detección de llama
-#define GAS_THRESHOLD 520       // Umbral del sensor de gas (ajustar según calibración)
 
 // Inicialización de LCD y sensores
 LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
@@ -26,12 +24,18 @@ DallasTemperature sensors(&oneWire);
 // Variables de temperatura
 float tempBase = 0.0;
 float tempAnterior = 0.0;
+
 // Variables de color
 int ledRojo = 9;
 int ledVerde = 10;
 int ledAzul = 11;
+
 // Variable de estado del buzzer
 bool buzzerActive;
+
+// Variables dinámicas de gas
+float gas_base = 0.0;
+float GAS_WARNING, GAS_THRESHOLD; // 20% y 30% de aumento
 
 // Función para detectar fuego considerando cada sensor por separado
 bool checkFire(float tempC, int gasValue, int flameValue, String &reason) {
@@ -50,14 +54,17 @@ bool checkFire(float tempC, int gasValue, int flameValue, String &reason) {
         Serial.println("ALERTA: Gas detectado!");
         fireDetected = true;
         reason = "Gas";
+    } else if (gasValue >= GAS_WARNING) {
+        Serial.println("ADVERTENCIA: Aumento de gas");
+        reason = "Adv. Gas";
     }
-    
+
     if (flameValue <= FLAME_DETECTED) {
         Serial.println("ALERTA: Llama detectada!");
         fireDetected = true;
         reason = "Fuego directo";
     }
-    
+
     // Control de LEDs y buzzer según la alerta
     if (fireDetected) {
         analogWrite(ledRojo, 0);  // Rojo cuando hay incendio
@@ -65,7 +72,7 @@ bool checkFire(float tempC, int gasValue, int flameValue, String &reason) {
         analogWrite(ledAzul, 255);    // Apagar azul
         digitalWrite(BUZZER_PIN, LOW); // Activar buzzer
         buzzerActive = true;
-    } else if (tempC - tempBase >= TEMP_INCREMENTO_UMBRAL - 3.0 || gasValue >= GAS_THRESHOLD * 0.9) { // Advertencia (naranja)
+    } else if (gasValue >= GAS_WARNING) { // Advertencia (naranja)
         analogWrite(ledRojo, 0);  // Naranja (rojo al 100%)
         analogWrite(ledVerde, 165); // Verde al 60%
         analogWrite(ledAzul, 255);    // Apagar azul
@@ -78,7 +85,7 @@ bool checkFire(float tempC, int gasValue, int flameValue, String &reason) {
         digitalWrite(BUZZER_PIN, HIGH); // Apagar el buzzer
         buzzerActive = false;
     }
-    
+
     return fireDetected;
 }
 
@@ -106,6 +113,18 @@ void setup() {
     Serial.print("Temperatura base registrada: ");
     Serial.print(tempBase);
     Serial.println(" °C");
+
+    // Leer gas base y calcular umbrales dinámicos
+    gas_base = analogRead(GAS_SENSOR_PIN);
+    GAS_WARNING = gas_base * 1.2;  // 20% más
+    GAS_THRESHOLD = gas_base * 1.3; // 30% más
+
+    Serial.print("Valor base de gas registrado: ");
+    Serial.println(gas_base);
+    Serial.print("Umbral de advertencia: ");
+    Serial.println(GAS_WARNING);
+    Serial.print("Umbral de alarma: ");
+    Serial.println(GAS_THRESHOLD);
 }
 
 void loop() {
@@ -118,23 +137,29 @@ void loop() {
 
     // Evaluar si se detecta fuego
     bool fireDetected = checkFire(tempC, gasValue, flameValue, fireReason);
-    
+
     // Mostrar en Monitor Serie
-    Serial.print("Temp: "); Serial.print(tempC); Serial.println(" °C");
-    Serial.print("Gas: "); Serial.print(gasValue);
-    Serial.print("Flame: "); Serial.print(flameValue <= FLAME_DETECTED ? "Llama detectada!" : "No hay llama.");
-    
+    Serial.print("Temp: ");
+    Serial.print(tempC);
+    Serial.println(" °C");
+    Serial.print("Gas: ");
+    Serial.print(gasValue);
+    Serial.print("Flame: ");
+    Serial.print(flameValue <= FLAME_DETECTED ? "Llama detectada!" : "No hay llama.");
+
     // Mostrar en LCD
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Temp: "); 
+    lcd.print("Temp: ");
     lcd.print(tempC);
     lcd.print("C");
 
     lcd.setCursor(0, 1);
     if (fireDetected) {
-        lcd.print("ALERTA: "); 
+        lcd.print("ALERTA: ");
         lcd.print(fireReason);
+    } else if (gasValue >= GAS_WARNING) {
+        lcd.print("ADVERTENCIA GAS");
     } else {
         lcd.print("Gas:");
         lcd.print(gasValue);
